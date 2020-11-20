@@ -1,0 +1,118 @@
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: jenkins-admin       #ServiceAccount名
+  namespace: default     #指定namespace，一定要修改成你自己的namespace
+  labels:
+    name: jenkins
+---
+kind: ClusterRoleBinding
+apiVersion: rbac.authorization.k8s.io/v1
+metadata:
+  name: jenkins-admin
+  labels:
+    name: jenkins
+subjects:
+  - kind: ServiceAccount
+    name: jenkins-admin
+    namespace: default
+roleRef:
+  kind: ClusterRole
+  name: cluster-admin
+  apiGroup: rbac.authorization.k8s.io
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  namespace: default
+  labels:
+    app: jenkins
+  name: jenkins
+spec:
+  selector:
+    matchLabels:
+      app: jenkins
+  replicas: 1
+  template:
+    metadata:
+      labels:
+        app: jenkins
+    spec:
+      serviceAccountName: jenkins-admin
+      containers:
+      - image: harbor.zcg.cool/jenkins/jenkins:latest
+        name: jenkins
+        securityContext:                     
+          runAsUser: 0     
+          privileged: true
+        ports:
+        - name: http
+          containerPort: 8080
+        - name: jnlp
+          containerPort: 50000
+        env:
+        - name: "JAVA_OPTS"
+          value: "-Duser.timezone=Asia/Shanghai"
+        - name: "JENKINS_OPTS"
+          value: "--prefix=/jenkins"
+        volumeMounts:
+        - name: data
+          mountPath: /var/jenkins_home
+      imagePullSecrets:
+      - name: harbor-secret
+
+      volumes:
+      - name: data
+        persistentVolumeClaim:
+          claimName: jenkins-data
+---
+apiVersion: v1
+kind: Service
+metadata:
+  namespace: default
+  labels:
+    app: jenkins
+  name: jenkins
+spec:
+  type: NodePort
+  ports:
+  - port: 8080
+    name: http
+    targetPort: 8080
+    nodePort: 30800
+  - port: 50000
+    name: jnlp
+    targetPort: 50000
+    nodePort: 30801
+  selector:
+    app: jenkins
+---
+kind: PersistentVolumeClaim
+apiVersion: v1
+metadata:
+  name: jenkins-data
+  annotations:
+    volume.beta.kubernetes.io/storage-class: "managed-nfs-storage"
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 20G
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: jenkins
+spec:
+ rules:
+ - host: jenkins.zcg.cool
+   http: 
+     paths:
+     - path: /
+       pathType: Prefix 
+       backend:
+         service:
+           name: jenkins
+           port:
+             number: 8080
